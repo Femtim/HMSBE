@@ -2,9 +2,9 @@ const User = require('../models/User.model');
 
 const bootstrapSuperAdmin = async () => {
   try {
-    const adminEmail = process.env.SUPER_ADMIN_EMAIL || 'admin@hospital.ng';
-    const adminPassword = process.env.SUPER_ADMIN_PASSWORD || 'Admin@2026!';
-    const adminPhone = process.env.SUPER_ADMIN_PHONE || '+2348000000001';
+    const adminEmail = process.env.SUPER_ADMIN_EMAIL ;
+    const adminPassword = process.env.SUPER_ADMIN_PASSWORD;
+    const adminPhone = process.env.SUPER_ADMIN_PHONE;
 
     const existingAdmin = await User.findOne({ role: 'SUPER_ADMIN' });
     if (existingAdmin) {

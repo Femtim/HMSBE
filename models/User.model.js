@@ -47,6 +47,13 @@ const UserSchema = new mongoose.Schema(
     emailVerificationExpires: {
       type: Date,
     },
+    // --- PASSWORD RESET FIELDS ---
+    passwordResetToken: {
+      type: String,
+    },
+    passwordResetExpires: {
+      type: Date,
+    },
     patientProfile: {
       hospitalCardNumber: { type: String, sparse: true, unique: true },
       dateOfBirth: { type: Date },

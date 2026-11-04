@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/User.model');
+const Appointment = require('../models/Appointment.model');
+const QueueTicket = require('../models/QueueTicket.model');
 const sendEmail = require('../utils/sendEmail');
 
 const signToken = (user) => {
@@ -24,6 +26,7 @@ const formatUserPayload = (user) => ({
   patientProfile: user.patientProfile,
 });
 
+// 1. Register Patient & Send Verification Email
 const registerPatient = async (req, res) => {
   try {
     const { fullName, email, phone, password, dateOfBirth, gender, bloodGroup, isVulnerable } =
@@ -102,6 +105,7 @@ const registerPatient = async (req, res) => {
   }
 };
 
+// 2. Verify Email Token
 const verifyEmail = async (req, res) => {
   try {
     const { token } = req.params;
@@ -133,6 +137,7 @@ const verifyEmail = async (req, res) => {
   }
 };
 
+// 3. Resend Verification Email
 const resendVerificationEmail = async (req, res) => {
   try {
     const { email } = req.body;
@@ -150,7 +155,10 @@ const resendVerificationEmail = async (req, res) => {
     }
 
     const rawVerificationToken = crypto.randomBytes(32).toString('hex');
-    user.emailVerificationToken = crypto.createHash('sha256').update(rawVerificationToken).digest('hex');
+    user.emailVerificationToken = crypto
+      .createHash('sha256')
+      .update(rawVerificationToken)
+      .digest('hex');
     user.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000;
     await user.save();
 
@@ -163,12 +171,16 @@ const resendVerificationEmail = async (req, res) => {
       html: `<p>Click <a href="${verificationUrl}">here</a> to verify your email.</p>`,
     });
 
-    return res.status(200).json({ success: true, message: `Verification link resent to ${user.email}.` });
+    return res.status(200).json({
+      success: true,
+      message: `Verification link resent to ${user.email}.`,
+    });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
+// 4. Login
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -176,7 +188,9 @@ const login = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email and password are required.' });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase(), isActive: true }).select('+password');
+    const user = await User.findOne({ email: email.toLowerCase(), isActive: true }).select(
+      '+password'
+    );
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
@@ -197,8 +211,174 @@ const login = async (req, res) => {
   }
 };
 
+// 5. Get Current Logged-in User Profile
 const getCurrentUser = async (req, res) => {
   return res.status(200).json({ success: true, data: formatUserPayload(req.user) });
+};
+
+// 6. Forgot Password (Emails a 1-hour reset link)
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'Please provide your email address.' });
+    }
+
+    const user = await User.findOne({ email: email.toLowerCase(), isActive: true });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'No active account found with that email address.',
+      });
+    }
+
+    const rawResetToken = crypto.randomBytes(32).toString('hex');
+    user.passwordResetToken = crypto.createHash('sha256').update(rawResetToken).digest('hex');
+    user.passwordResetExpires = Date.now() + 60 * 60 * 1000; // 1 hour
+    await user.save();
+
+    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    const resetUrl = `${clientUrl}/reset-password/${rawResetToken}`;
+
+    await sendEmail({
+      to: user.email,
+      subject: 'Password Reset Request - HAQMS Hospital Portal',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px;">
+          <h2 style="color: #1E293B;">Reset Your HAQMS Password</h2>
+          <p style="color: #475569; font-size: 14px;">Hello ${user.fullName}, click the button below within 1 hour to set a new password:</p>
+          <div style="margin: 28px 0;">
+            <a href="${resetUrl}" style="background-color: #312E81; color: #ffffff; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 8px; display: inline-block;">
+              Reset Password
+            </a>
+          </div>
+          <p style="color: #94a3b8; font-size: 12px;">If you did not request this, please ignore this email.</p>
+        </div>
+      `,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: `Password reset link sent to ${user.email}.`,
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 7. Reset Password via Email Token
+const resetPassword = async (req, res) => {
+  try {
+    const { token } = req.params;
+    const { newPassword } = req.body;
+
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 8 characters long.',
+      });
+    }
+
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
+    const user = await User.findOne({
+      passwordResetToken: hashedToken,
+      passwordResetExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password reset link is invalid or has expired.',
+      });
+    }
+
+    user.password = newPassword;
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password has been reset successfully! You can now log in.',
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 8. Update Password from Sidebar Settings (While Logged In)
+const updatePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Both current password and new password are required.',
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 8 characters long.',
+      });
+    }
+
+    const user = await User.findById(req.user._id).select('+password');
+    if (!user || !(await user.comparePassword(currentPassword))) {
+      return res.status(401).json({
+        success: false,
+        message: 'Your current password is incorrect.',
+      });
+    }
+
+    user.password = newPassword;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Password updated successfully.',
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 9. Delete Account Permanently (With Cascading Cleanup)
+const deleteAccount = async (req, res) => {
+  try {
+    const { password } = req.body;
+    const user = await User.findById(req.user._id).select('+password');
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    if (!password || !(await user.comparePassword(password))) {
+      return res.status(401).json({
+        success: false,
+        message: 'Incorrect password. Account deletion aborted.',
+      });
+    }
+
+    // Clean up associated appointments and queue tickets
+    await Promise.all([
+      Appointment.deleteMany({
+        $or: [{ patientId: user._id }, { doctorId: user._id }],
+      }),
+      QueueTicket.deleteMany({
+        $or: [{ patientId: user._id }, { doctorId: user._id }],
+      }),
+      User.findByIdAndDelete(user._id),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Your hospital account and associated records have been permanently deleted.',
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
 };
 
 module.exports = {
@@ -207,4 +387,8 @@ module.exports = {
   resendVerificationEmail,
   login,
   getCurrentUser,
+  forgotPassword,
+  resetPassword,
+  updatePassword,
+  deleteAccount,
 };
