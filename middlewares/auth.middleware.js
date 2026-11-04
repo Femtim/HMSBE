@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User.model'); // Direct model import instead of repository
+const User = require('../models/User.model');
 
 const authenticate = async (req, res, next) => {
   try {
@@ -17,10 +17,8 @@ const authenticate = async (req, res, next) => {
 
     const decoded = jwt.verify(
       token,
-      process.env.JWT_SECRET || 'hospital_mvcr_secret_key_2026'
+      process.env.JWT_SECRET || 'hospital_mcr_secret_key_2026'
     );
-    
-    // Query User model directly
     const currentUser = await User.findById(decoded.id);
 
     if (!currentUser || !currentUser.isActive) {

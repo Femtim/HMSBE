@@ -26,6 +26,7 @@ const onboardDoctor = async (req, res) => {
       phone,
       password,
       role: 'DOCTOR',
+      isEmailVerified: true,
       doctorProfile: {
         department,
         specialization: specialization || 'General Medical Officer',
