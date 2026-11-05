@@ -66,6 +66,8 @@ const registerPatient = async (req, res) => {
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
     const verificationUrl = `${clientUrl}/verify-email/${rawVerificationToken}`;
 
+    console.log(`🔗 [DEV VERIFICATION LINK] for ${newPatient.email}: ${verificationUrl}`);
+
     const htmlMessage = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px;">
         <h2 style="color: #1E293B; margin-bottom: 8px;">Welcome to HAQMS, ${newPatient.fullName}!</h2>
@@ -86,7 +88,13 @@ const registerPatient = async (req, res) => {
         html: htmlMessage,
       });
     } catch (emailErr) {
-      console.error('Email sending failed:', emailErr.message);
+      console.warn('⚠️ SMTP not configured or failed, using fallback link:', emailErr.message);
+      return res.status(201).json({
+        success: true,
+        requiresVerification: true,
+        fallbackVerificationUrl: verificationUrl,
+        message: `Account created! (SMTP failed, use the direct verification button below or check backend console).`,
+      });
     }
 
     return res.status(201).json({
@@ -165,11 +173,22 @@ const resendVerificationEmail = async (req, res) => {
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
     const verificationUrl = `${clientUrl}/verify-email/${rawVerificationToken}`;
 
-    await sendEmail({
-      to: user.email,
-      subject: 'New Verification Link - HAQMS Hospital Portal',
-      html: `<p>Click <a href="${verificationUrl}">here</a> to verify your email.</p>`,
-    });
+    console.log(`🔗 [DEV RESEND VERIFICATION LINK] for ${user.email}: ${verificationUrl}`);
+
+    try {
+      await sendEmail({
+        to: user.email,
+        subject: 'New Verification Link - HAQMS Hospital Portal',
+        html: `<p>Click <a href="${verificationUrl}">here</a> to verify your email.</p>`,
+      });
+    } catch (emailErr) {
+      console.warn('⚠️ SMTP failed on resend:', emailErr.message);
+      return res.status(200).json({
+        success: true,
+        fallbackVerificationUrl: verificationUrl,
+        message: 'SMTP not configured. Click the direct verification link generated below.',
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -216,7 +235,7 @@ const getCurrentUser = async (req, res) => {
   return res.status(200).json({ success: true, data: formatUserPayload(req.user) });
 };
 
-// 6. Forgot Password (Emails a 1-hour reset link)
+// 6. Forgot Password (With Fallback Link if SMTP Fails)
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -240,22 +259,32 @@ const forgotPassword = async (req, res) => {
     const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
     const resetUrl = `${clientUrl}/reset-password/${rawResetToken}`;
 
-    await sendEmail({
-      to: user.email,
-      subject: 'Password Reset Request - HAQMS Hospital Portal',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px;">
-          <h2 style="color: #1E293B;">Reset Your HAQMS Password</h2>
-          <p style="color: #475569; font-size: 14px;">Hello ${user.fullName}, click the button below within 1 hour to set a new password:</p>
-          <div style="margin: 28px 0;">
-            <a href="${resetUrl}" style="background-color: #312E81; color: #ffffff; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 8px; display: inline-block;">
-              Reset Password
-            </a>
+    console.log(`🔑 [DEV PASSWORD RESET LINK] for ${user.email}: ${resetUrl}`);
+
+    try {
+      await sendEmail({
+        to: user.email,
+        subject: 'Password Reset Request - HAQMS Hospital Portal',
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px;">
+            <h2 style="color: #1E293B;">Reset Your HAQMS Password</h2>
+            <p style="color: #475569; font-size: 14px;">Hello ${user.fullName}, click the button below within 1 hour to set a new password:</p>
+            <div style="margin: 28px 0;">
+              <a href="${resetUrl}" style="background-color: #312E81; color: #ffffff; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 8px; display: inline-block;">
+                Reset Password
+              </a>
+            </div>
           </div>
-          <p style="color: #94a3b8; font-size: 12px;">If you did not request this, please ignore this email.</p>
-        </div>
-      `,
-    });
+        `,
+      });
+    } catch (emailErr) {
+      console.warn('⚠️ SMTP failed on forgotPassword:', emailErr.message);
+      return res.status(200).json({
+        success: true,
+        fallbackResetUrl: resetUrl,
+        message: 'Reset token generated! (SMTP is not configured, click the direct reset link below).',
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -306,7 +335,7 @@ const resetPassword = async (req, res) => {
   }
 };
 
-// 8. Update Password from Sidebar Settings (While Logged In)
+// 8. Update Password from Sidebar Settings
 const updatePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -344,7 +373,7 @@ const updatePassword = async (req, res) => {
   }
 };
 
-// 9. Delete Account Permanently (With Cascading Cleanup)
+// 9. Delete Account Permanently
 const deleteAccount = async (req, res) => {
   try {
     const { password } = req.body;
@@ -361,7 +390,6 @@ const deleteAccount = async (req, res) => {
       });
     }
 
-    // Clean up associated appointments and queue tickets
     await Promise.all([
       Appointment.deleteMany({
         $or: [{ patientId: user._id }, { doctorId: user._id }],

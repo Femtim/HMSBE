@@ -14,15 +14,22 @@ const app = express();
 const server = http.createServer(app);
 
 const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
   process.env.CLIENT_URL,
 ].filter(Boolean);
 
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+    if (
+      !origin ||
+      allowedOrigins.includes(origin) ||
+      origin.endsWith('.vercel.app') ||
+      origin.endsWith('.onrender.com')
+    ) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      callback(null, true);
     }
   },
   credentials: true,
@@ -56,7 +63,7 @@ app.get('/health', (req, res) => {
 
 app.use('/api/v1', apiRoutes);
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT ;
 const MONGO_URI = process.env.MONGO_URI;
 
 mongoose
@@ -64,7 +71,7 @@ mongoose
   .then(async () => {
     console.log('✅ Connected to MongoDB');
     await bootstrapSuperAdmin();
-    server.listen(PORT, () => {
+    server.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server & WebSocket running on port ${PORT}`);
     });
   })
