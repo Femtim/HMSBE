@@ -26,7 +26,7 @@ const formatUserPayload = (user) => ({
   patientProfile: user.patientProfile,
 });
 
-// 1. Register Patient & Send Verification Email
+// 1. Register Patient (Fault-tolerant email sending)
 const registerPatient = async (req, res) => {
   try {
     const { fullName, email, phone, password, dateOfBirth, gender, bloodGroup, isVulnerable } =
@@ -47,8 +47,8 @@ const registerPatient = async (req, res) => {
 
     const newPatient = await User.create({
       fullName,
-      email,
-      phone,
+      email: email.toLowerCase().trim(),
+      phone: phone.trim(),
       password,
       role: 'PATIENT',
       isEmailVerified: false,
@@ -63,44 +63,28 @@ const registerPatient = async (req, res) => {
       },
     });
 
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
     const verificationUrl = `${clientUrl}/verify-email/${rawVerificationToken}`;
 
-    console.log(`🔗 [DEV VERIFICATION LINK] for ${newPatient.email}: ${verificationUrl}`);
-
-    const htmlMessage = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px;">
-        <h2 style="color: #1E293B; margin-bottom: 8px;">Welcome to HAQMS, ${newPatient.fullName}!</h2>
-        <p style="color: #475569; font-size: 14px;">Your Digital Hospital Card Number: <strong style="color: #0D9488;">${hospitalCardNumber}</strong></p>
-        <p style="color: #475569; font-size: 14px;">Please verify your email within 24 hours to activate your account:</p>
-        <div style="margin: 28px 0;">
-          <a href="${verificationUrl}" style="background-color: #0D9488; color: #ffffff; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 8px; display: inline-block;">
-            Verify Email Address
-          </a>
-        </div>
-      </div>
-    `;
-
+    let emailSent = false;
     try {
-      await sendEmail({
+      emailSent = await sendEmail({
         to: newPatient.email,
         subject: 'Verify Your Hospital Portal Email - HAQMS',
-        html: htmlMessage,
+        html: `<p>Welcome to HAQMS, ${newPatient.fullName}! Click <a href="${verificationUrl}">here</a> to verify your email.</p>`,
+        fallbackUrl: verificationUrl,
       });
     } catch (emailErr) {
-      console.warn('⚠️ SMTP not configured or failed, using fallback link:', emailErr.message);
-      return res.status(201).json({
-        success: true,
-        requiresVerification: true,
-        fallbackVerificationUrl: verificationUrl,
-        message: `Account created! (SMTP failed, use the direct verification button below or check backend console).`,
-      });
+      console.error('⚠️ SMTP Send Failed during register:', emailErr.message);
     }
 
     return res.status(201).json({
       success: true,
       requiresVerification: true,
-      message: `Registration successful! A verification link has been sent to ${newPatient.email}.`,
+      verificationUrl: !emailSent ? verificationUrl : undefined,
+      message: emailSent
+        ? `Registration successful! Verification link sent to ${newPatient.email}.`
+        : `Account created! Email server is unreachable, please verify directly using this link: ${verificationUrl}`,
     });
   } catch (error) {
     if (error.code === 11000) {
@@ -113,7 +97,7 @@ const registerPatient = async (req, res) => {
   }
 };
 
-// 2. Verify Email Token
+// 2. Verify Email
 const verifyEmail = async (req, res) => {
   try {
     const { token } = req.params;
@@ -149,50 +133,38 @@ const verifyEmail = async (req, res) => {
 const resendVerificationEmail = async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ success: false, message: 'Email address is required.' });
-    }
-
-    const user = await User.findOne({ email: email.toLowerCase(), isActive: true });
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'No account found with that email.' });
-    }
-
+    const user = await User.findOne({ email: email?.toLowerCase().trim(), isActive: true });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found.' });
     if (user.isEmailVerified) {
       return res.status(400).json({ success: false, message: 'Email is already verified.' });
     }
 
-    const rawVerificationToken = crypto.randomBytes(32).toString('hex');
-    user.emailVerificationToken = crypto
-      .createHash('sha256')
-      .update(rawVerificationToken)
-      .digest('hex');
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    user.emailVerificationToken = crypto.createHash('sha256').update(rawToken).digest('hex');
     user.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000;
     await user.save();
 
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-    const verificationUrl = `${clientUrl}/verify-email/${rawVerificationToken}`;
+    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
+    const verificationUrl = `${clientUrl}/verify-email/${rawToken}`;
 
-    console.log(`🔗 [DEV RESEND VERIFICATION LINK] for ${user.email}: ${verificationUrl}`);
-
+    let emailSent = false;
     try {
-      await sendEmail({
+      emailSent = await sendEmail({
         to: user.email,
-        subject: 'New Verification Link - HAQMS Hospital Portal',
+        subject: 'New Verification Link - HAQMS',
         html: `<p>Click <a href="${verificationUrl}">here</a> to verify your email.</p>`,
+        fallbackUrl: verificationUrl,
       });
     } catch (emailErr) {
-      console.warn('⚠️ SMTP failed on resend:', emailErr.message);
-      return res.status(200).json({
-        success: true,
-        fallbackVerificationUrl: verificationUrl,
-        message: 'SMTP not configured. Click the direct verification link generated below.',
-      });
+      console.error('⚠️ SMTP Send Failed during resend:', emailErr.message);
     }
 
     return res.status(200).json({
       success: true,
-      message: `Verification link resent to ${user.email}.`,
+      verificationUrl: !emailSent ? verificationUrl : undefined,
+      message: emailSent
+        ? `Verification link resent to ${user.email}.`
+        : `Email server unreachable. Click or copy this link to verify: ${verificationUrl}`,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -207,14 +179,22 @@ const login = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email and password are required.' });
     }
 
-    const user = await User.findOne({ email: email.toLowerCase(), isActive: true }).select(
-      '+password'
-    );
+    const user = await User.findOne({
+      email: email.toLowerCase().trim(),
+      isActive: true,
+    }).select('+password');
+
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
 
-    if (!user.isEmailVerified) {
+    // Auto-verify Doctors and Super Admins if they were created before email verification existed
+    if (user.role === 'SUPER_ADMIN' || user.role === 'DOCTOR') {
+      if (!user.isEmailVerified) {
+        user.isEmailVerified = true;
+        await user.save();
+      }
+    } else if (user.isEmailVerified === false) {
       return res.status(403).json({
         success: false,
         requiresVerification: true,
@@ -230,20 +210,16 @@ const login = async (req, res) => {
   }
 };
 
-// 5. Get Current Logged-in User Profile
+// 5. Get Current User
 const getCurrentUser = async (req, res) => {
   return res.status(200).json({ success: true, data: formatUserPayload(req.user) });
 };
 
-// 6. Forgot Password (With Fallback Link if SMTP Fails)
+// 6. Forgot Password (Fault-tolerant email sending)
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
-    if (!email) {
-      return res.status(400).json({ success: false, message: 'Please provide your email address.' });
-    }
-
-    const user = await User.findOne({ email: email.toLowerCase(), isActive: true });
+    const user = await User.findOne({ email: email?.toLowerCase().trim(), isActive: true });
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -251,60 +227,47 @@ const forgotPassword = async (req, res) => {
       });
     }
 
-    const rawResetToken = crypto.randomBytes(32).toString('hex');
-    user.passwordResetToken = crypto.createHash('sha256').update(rawResetToken).digest('hex');
-    user.passwordResetExpires = Date.now() + 60 * 60 * 1000; // 1 hour
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    user.passwordResetToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+    user.passwordResetExpires = Date.now() + 60 * 60 * 1000;
     await user.save();
 
-    const clientUrl = process.env.CLIENT_URL || 'http://localhost:5173';
-    const resetUrl = `${clientUrl}/reset-password/${rawResetToken}`;
+    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
+    const resetUrl = `${clientUrl}/reset-password/${rawToken}`;
 
-    console.log(`🔑 [DEV PASSWORD RESET LINK] for ${user.email}: ${resetUrl}`);
-
+    let emailSent = false;
     try {
-      await sendEmail({
+      emailSent = await sendEmail({
         to: user.email,
-        subject: 'Password Reset Request - HAQMS Hospital Portal',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px;">
-            <h2 style="color: #1E293B;">Reset Your HAQMS Password</h2>
-            <p style="color: #475569; font-size: 14px;">Hello ${user.fullName}, click the button below within 1 hour to set a new password:</p>
-            <div style="margin: 28px 0;">
-              <a href="${resetUrl}" style="background-color: #312E81; color: #ffffff; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 8px; display: inline-block;">
-                Reset Password
-              </a>
-            </div>
-          </div>
-        `,
+        subject: 'Password Reset - HAQMS',
+        html: `<p>Click <a href="${resetUrl}">here</a> to reset your password within 1 hour.</p>`,
+        fallbackUrl: resetUrl,
       });
     } catch (emailErr) {
-      console.warn('⚠️ SMTP failed on forgotPassword:', emailErr.message);
-      return res.status(200).json({
-        success: true,
-        fallbackResetUrl: resetUrl,
-        message: 'Reset token generated! (SMTP is not configured, click the direct reset link below).',
-      });
+      console.error('⚠️ SMTP Send Failed during forgotPassword:', emailErr.message);
     }
 
     return res.status(200).json({
       success: true,
-      message: `Password reset link sent to ${user.email}.`,
+      resetUrl: !emailSent ? resetUrl : undefined,
+      message: emailSent
+        ? `Password reset link sent to ${user.email}.`
+        : `Email server blocked by host. Copy this direct reset link: ${resetUrl}`,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// 7. Reset Password via Email Token
+// 7. Reset Password
 const resetPassword = async (req, res) => {
   try {
     const { token } = req.params;
     const { newPassword } = req.body;
-
     if (!newPassword || newPassword.length < 8) {
       return res.status(400).json({
         success: false,
-        message: 'New password must be at least 8 characters long.',
+        message: 'Password must be at least 8 characters.',
       });
     }
 
@@ -317,53 +280,39 @@ const resetPassword = async (req, res) => {
     if (!user) {
       return res.status(400).json({
         success: false,
-        message: 'Password reset link is invalid or has expired.',
+        message: 'Reset link is invalid or has expired.',
       });
     }
 
     user.password = newPassword;
+    user.isEmailVerified = true; // Also mark email verified upon password reset
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
     await user.save();
 
     return res.status(200).json({
       success: true,
-      message: 'Password has been reset successfully! You can now log in.',
+      message: 'Password reset successful! You may now sign in.',
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// 8. Update Password from Sidebar Settings
+// 8. Update Password (Logged In)
 const updatePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({
-        success: false,
-        message: 'Both current password and new password are required.',
-      });
-    }
-
-    if (newPassword.length < 8) {
-      return res.status(400).json({
-        success: false,
-        message: 'New password must be at least 8 characters long.',
-      });
-    }
-
     const user = await User.findById(req.user._id).select('+password');
     if (!user || !(await user.comparePassword(currentPassword))) {
       return res.status(401).json({
         success: false,
-        message: 'Your current password is incorrect.',
+        message: 'Current password is incorrect.',
       });
     }
 
     user.password = newPassword;
     await user.save();
-
     return res.status(200).json({
       success: true,
       message: 'Password updated successfully.',
@@ -373,36 +322,27 @@ const updatePassword = async (req, res) => {
   }
 };
 
-// 9. Delete Account Permanently
+// 9. Delete Account
 const deleteAccount = async (req, res) => {
   try {
     const { password } = req.body;
     const user = await User.findById(req.user._id).select('+password');
-
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found.' });
-    }
-
-    if (!password || !(await user.comparePassword(password))) {
+    if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({
         success: false,
-        message: 'Incorrect password. Account deletion aborted.',
+        message: 'Incorrect password.',
       });
     }
 
     await Promise.all([
-      Appointment.deleteMany({
-        $or: [{ patientId: user._id }, { doctorId: user._id }],
-      }),
-      QueueTicket.deleteMany({
-        $or: [{ patientId: user._id }, { doctorId: user._id }],
-      }),
+      Appointment.deleteMany({ $or: [{ patientId: user._id }, { doctorId: user._id }] }),
+      QueueTicket.deleteMany({ $or: [{ patientId: user._id }, { doctorId: user._id }] }),
       User.findByIdAndDelete(user._id),
     ]);
 
     return res.status(200).json({
       success: true,
-      message: 'Your hospital account and associated records have been permanently deleted.',
+      message: 'Account permanently deleted.',
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });

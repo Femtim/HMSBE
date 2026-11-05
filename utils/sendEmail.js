@@ -1,26 +1,37 @@
 const nodemailer = require('nodemailer');
 
-const sendEmail = async ({ to, subject, html }) => {
+const sendEmail = async ({ to, subject, html, fallbackUrl }) => {
+  // Always log the action URL to the server console so you never get stuck
+  if (fallbackUrl) {
+    console.log(`🔗 [ACTION LINK for ${to}]: ${fallbackUrl}`);
+  }
+
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    throw new Error('EMAIL_USER or EMAIL_PASS is not configured in .env');
+    console.warn('⚠️ EMAIL_USER or EMAIL_PASS missing in .env. Skipping SMTP send.');
+    return false;
   }
 
   const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS,
     },
+    connectionTimeout: 5000, // Fail fast in 5s instead of hanging Render
+    greetingTimeout: 5000,
+    socketTimeout: 5000,
   });
 
-  const mailOptions = {
-    from: `"HAQMS Hospital Portal" <${process.env.EMAIL_USER}>`,
+  await transporter.sendMail({
+    from: `"HAQMS Portal" <${process.env.EMAIL_USER}>`,
     to,
     subject,
     html,
-  };
+  });
 
-  await transporter.sendMail(mailOptions);
+  return true;
 };
 
 module.exports = sendEmail;
