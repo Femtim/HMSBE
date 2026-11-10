@@ -7,50 +7,30 @@ const authenticate = async (req, res, next) => {
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
     }
-
     if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: 'Authentication required. Please log in.',
-      });
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
     }
 
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || 'hospital_mcr_secret_key_2026'
-    );
+    const decoded = jwt.verify(token, process.env.JWT_SECRET );
     const currentUser = await User.findById(decoded.id);
-
     if (!currentUser || !currentUser.isActive) {
-      return res.status(401).json({
-        success: false,
-        message: 'User account no longer exists or is inactive.',
-      });
+      return res.status(401).json({ success: false, message: 'User account inactive or missing.' });
     }
 
     req.user = currentUser;
     next();
   } catch (error) {
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid or expired token. Please log in again.',
-    });
+    return res.status(401).json({ success: false, message: 'Invalid or expired token.' });
   }
 };
 
 const authorizeRoles = (...allowedRoles) => {
   return (req, res, next) => {
     if (!req.user || !allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        message: `Access Denied: Role '${req.user?.role}' cannot perform this action.`,
-      });
+      return res.status(403).json({ success: false, message: 'Access Denied.' });
     }
     next();
   };
 };
 
-module.exports = {
-  authenticate,
-  authorizeRoles,
-};
+module.exports = { authenticate, authorizeRoles };

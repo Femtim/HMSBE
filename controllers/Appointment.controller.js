@@ -4,7 +4,6 @@ const User = require('../models/User.model');
 const computeAvailableSlots = (shiftStart, shiftEnd, intervalMins, bookedSlots) => {
   const slots = [];
   const bookedSet = new Set(bookedSlots.map((b) => b.timeSlot.startTime));
-
   const [startHour, startMin] = shiftStart.split(':').map(Number);
   const [endHour, endMin] = shiftEnd.split(':').map(Number);
 
@@ -21,12 +20,9 @@ const computeAvailableSlots = (shiftStart, shiftEnd, intervalMins, bookedSlots) 
     const endM = String(nextMins % 60).padStart(2, '0');
     const endTime = `${endH}:${endM}`;
 
-    if (!bookedSet.has(startTime)) {
-      slots.push({ startTime, endTime });
-    }
+    if (!bookedSet.has(startTime)) slots.push({ startTime, endTime });
     currentMins = nextMins;
   }
-
   return slots;
 };
 
@@ -46,10 +42,6 @@ const getActiveDoctorsByDepartment = async (req, res) => {
 const getDoctorAvailableSlots = async (req, res) => {
   try {
     const { doctorId, date } = req.query;
-    if (!doctorId || !date) {
-      return res.status(400).json({ success: false, message: 'doctorId and date are required.' });
-    }
-
     const doctor = await User.findById(doctorId);
     if (!doctor || doctor.role !== 'DOCTOR') {
       return res.status(404).json({ success: false, message: 'Doctor not found.' });
@@ -60,14 +52,13 @@ const getDoctorAvailableSlots = async (req, res) => {
       doctorId,
       appointmentDate: normalizedDate,
       status: { $in: ['PENDING', 'CONFIRMED', 'CHECKED_IN'] },
-    }).select('timeSlot.startTime timeSlot.endTime status -_id');
+    }).select('timeSlot.startTime');
 
     const shiftStart = doctor.doctorProfile?.shiftHours?.start || '08:00';
     const shiftEnd = doctor.doctorProfile?.shiftHours?.end || '16:00';
     const interval = doctor.doctorProfile?.avgConsultationTimeMins || 15;
 
     const availableSlots = computeAvailableSlots(shiftStart, shiftEnd, interval, bookedSlots);
-
     return res.status(200).json({
       success: true,
       doctor: doctor.fullName,
@@ -84,16 +75,13 @@ const bookAppointment = async (req, res) => {
   try {
     const patientId = req.user._id;
     const { doctorId, appointmentDate, startTime, endTime, symptomsOrReason } = req.body;
-
     const doctor = await User.findById(doctorId);
     if (!doctor || doctor.role !== 'DOCTOR') {
-      return res.status(404).json({ success: false, message: 'Selected doctor does not exist.' });
+      return res.status(404).json({ success: false, message: 'Doctor not found.' });
     }
 
     const normalizedDate = new Date(`${appointmentDate}T00:00:00.000Z`);
-    const dateCompact = appointmentDate.replace(/-/g, '');
-    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-    const appointmentReference = `APT-${dateCompact}-${randomSuffix}`;
+    const appointmentReference = `APT-${appointmentDate.replace(/-/g, '')}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const appointment = await Appointment.create({
       appointmentReference,
@@ -107,10 +95,10 @@ const bookAppointment = async (req, res) => {
       symptomsOrReason,
     });
 
-    return res.status(201).json({ success: true, message: 'Appointment booked successfully.', data: appointment });
+    return res.status(201).json({ success: true, message: 'Appointment booked.', data: appointment });
   } catch (error) {
     if (error.code === 11000) {
-      return res.status(409).json({ success: false, message: 'This time slot is already booked.' });
+      return res.status(409).json({ success: false, message: 'Selected time slot is already booked.' });
     }
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -119,9 +107,8 @@ const bookAppointment = async (req, res) => {
 const getMyAppointments = async (req, res) => {
   try {
     const appointments = await Appointment.find({ patientId: req.user._id })
-      .populate('doctorId', 'fullName doctorProfile.department doctorProfile.consultationRoom')
-      .sort({ appointmentDate: -1, 'timeSlot.startTime': 1 });
-
+      .populate('doctorId', 'fullName doctorProfile')
+      .sort({ appointmentDate: -1 });
     return res.status(200).json({ success: true, count: appointments.length, data: appointments });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -130,17 +117,12 @@ const getMyAppointments = async (req, res) => {
 
 const cancelAppointment = async (req, res) => {
   try {
-    const { appointmentId } = req.params;
-    const { cancellationReason } = req.body;
-
     const updated = await Appointment.findByIdAndUpdate(
-      appointmentId,
-      { $set: { status: 'CANCELLED', cancellationReason: cancellationReason || 'Cancelled by patient' } },
+      req.params.appointmentId,
+      { $set: { status: 'CANCELLED', cancellationReason: req.body.cancellationReason || 'Cancelled' } },
       { new: true }
     );
-
     if (!updated) return res.status(404).json({ success: false, message: 'Appointment not found.' });
-
     return res.status(200).json({ success: true, message: 'Appointment cancelled.', data: updated });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });

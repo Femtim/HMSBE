@@ -8,7 +8,7 @@ const sendEmail = require('../utils/sendEmail');
 const signToken = (user) => {
   return jwt.sign(
     { id: user._id, role: user.role },
-    process.env.JWT_SECRET,
+    process.env.JWT_SECRET || 'hospital_mcr_secret_key_2026',
     { expiresIn: '1d' }
   );
 };
@@ -26,7 +26,7 @@ const formatUserPayload = (user) => ({
   patientProfile: user.patientProfile,
 });
 
-// 1. Register Patient (Sends verification strictly to email inbox)
+// 1. Register Patient
 const registerPatient = async (req, res) => {
   try {
     const { fullName, email, phone, password, dateOfBirth, gender, bloodGroup, isVulnerable } =
@@ -148,7 +148,7 @@ const resendVerificationEmail = async (req, res) => {
     user.emailVerificationExpires = Date.now() + 24 * 60 * 60 * 1000;
     await user.save();
 
-    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
+    const clientUrl = (process.env.CLIENT_URL).replace(/\/$/, '');
     const verificationUrl = `${clientUrl}/verify-email/${rawToken}`;
 
     console.log(`[EMAIL DISPATCH] Resent verification link for ${user.email}: ${verificationUrl}`);
@@ -156,7 +156,7 @@ const resendVerificationEmail = async (req, res) => {
     try {
       await sendEmail({
         to: user.email,
-        subject: 'New Verification Link - HAQMS',
+        subject: 'New Verification Link - GENERAL HOSPITAL',
         html: `
           <div style="font-family: sans-serif; padding: 20px; color: #1e293b;">
             <h2>Email Verification Request</h2>
@@ -216,11 +216,53 @@ const login = async (req, res) => {
   }
 };
 
+// 5. Get Current User
 const getCurrentUser = async (req, res) => {
   return res.status(200).json({ success: true, data: formatUserPayload(req.user) });
 };
 
-// 5. Forgot Password
+// 6. Update Patient Profile & Triage Details
+const updateProfile = async (req, res) => {
+  try {
+    const { fullName, phone, dateOfBirth, gender, bloodGroup, isVulnerable } = req.body;
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User account not found.' });
+    }
+
+    if (fullName) user.fullName = fullName.trim();
+    if (phone) user.phone = phone.trim();
+
+    if (user.role === 'PATIENT') {
+      if (!user.patientProfile) user.patientProfile = {};
+      if (dateOfBirth) user.patientProfile.dateOfBirth = dateOfBirth;
+      if (gender) user.patientProfile.gender = gender;
+      if (bloodGroup) user.patientProfile.bloodGroup = bloodGroup;
+      if (typeof isVulnerable === 'boolean') {
+        user.patientProfile.isVulnerable = isVulnerable;
+      }
+    }
+
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Profile and triage details updated.',
+      data: formatUserPayload(user),
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        success: false,
+        message: 'That phone number is already registered to another account.',
+      });
+    }
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// 7. Forgot Password
 const forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -260,14 +302,14 @@ const forgotPassword = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `Password reset link sent to ${user.email}.`,
+      message: `Password reset link has been sent to ${user.email}.`,
     });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// 6. Reset Password
+// 8. Reset Password
 const resetPassword = async (req, res) => {
   try {
     const { token } = req.params;
@@ -307,7 +349,7 @@ const resetPassword = async (req, res) => {
   }
 };
 
-// 7. Update Password
+// 9. Update Password
 const updatePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -330,7 +372,7 @@ const updatePassword = async (req, res) => {
   }
 };
 
-// 8. Delete Account
+// 10. Delete Account
 const deleteAccount = async (req, res) => {
   try {
     const { password } = req.body;
@@ -363,6 +405,7 @@ module.exports = {
   resendVerificationEmail,
   login,
   getCurrentUser,
+  updateProfile,
   forgotPassword,
   resetPassword,
   updatePassword,

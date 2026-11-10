@@ -13,69 +13,44 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  process.env.CLIENT_URL,
-].filter(Boolean);
-
+const allowedOrigins = ['http://localhost:5173', process.env.CLIENT_URL].filter(Boolean);
 const corsOptions = {
-  origin: function (origin, callback) {
-    if (
-      !origin ||
-      allowedOrigins.includes(origin) ||
-      origin.endsWith('.vercel.app') ||
-      origin.endsWith('.onrender.com')
-    ) {
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
       callback(null, true);
     } else {
-      callback(null, true);
+      callback(new Error('CORS blocked'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 };
 
-const io = new SocketServer(server, {
-  cors: corsOptions,
-});
-
+const io = new SocketServer(server, { cors: corsOptions });
 app.set('io', io);
 
 io.on('connection', (socket) => {
-  socket.on('join:department', (department) => {
-    if (department) {
-      socket.join(department.toUpperCase());
-    }
+  socket.on('join:department', (dept) => {
+    if (dept) socket.join(dept.toUpperCase());
   });
 });
 
 app.use(cors(corsOptions));
 app.use(express.json());
 
-app.get('/', (req, res) => {
-  res.status(200).json({ message: 'HAQMS Backend & Socket.io Server is Live 🚀' });
-});
-
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
-});
-
+app.get('/', (req, res) => res.status(200).json({ message: 'HAQMS Backend Active' }));
+app.get('/health', (req, res) => res.status(200).json({ status: 'OK' }));
 app.use('/api/v1', apiRoutes);
 
-const PORT = process.env.PORT ;
-const MONGO_URI = process.env.MONGO_URI;
-
+const PORT = process.env.PORT || 5000;
 mongoose
-  .connect(MONGO_URI)
+  .connect(process.env.MONGO_URI)
   .then(async () => {
-    console.log('✅ Connected to MongoDB');
+    console.log('Connected to MongoDB');
     await bootstrapSuperAdmin();
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 Server & WebSocket running on port ${PORT}`);
-    });
+    server.listen(PORT, '0.0.0.0', () => console.log(`Server running on port ${PORT}`));
   })
   .catch((err) => {
-    console.error('❌ MongoDB connection error:', err.message);
+    console.error('Database connection error:', err.message);
     process.exit(1);
   });

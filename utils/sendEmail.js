@@ -1,13 +1,8 @@
 const nodemailer = require('nodemailer');
 
-const sendEmail = async ({ to, subject, html, fallbackUrl }) => {
-  // Always log the action URL to the server console so you never get stuck
-  if (fallbackUrl) {
-    console.log(`🔗 [ACTION LINK for ${to}]: ${fallbackUrl}`);
-  }
-
+const sendEmail = async ({ to, subject, html }) => {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.warn('⚠️ EMAIL_USER or EMAIL_PASS missing in .env. Skipping SMTP send.');
+    console.warn('EMAIL_USER or EMAIL_PASS is not configured in environment variables.');
     return false;
   }
 
@@ -19,13 +14,13 @@ const sendEmail = async ({ to, subject, html, fallbackUrl }) => {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS,
     },
-    connectionTimeout: 5000, // Fail fast in 5s instead of hanging Render
+    connectionTimeout: 5000,
     greetingTimeout: 5000,
     socketTimeout: 5000,
   });
 
   await transporter.sendMail({
-    from: `"HAQMS Portal" <${process.env.EMAIL_USER}>`,
+    from: `"GENERAL HOSPITAL" <${process.env.EMAIL_USER}>`,
     to,
     subject,
     html,

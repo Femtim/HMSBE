@@ -5,6 +5,7 @@ const {
   resendVerificationEmail,
   login,
   getCurrentUser,
+  updateProfile,
   forgotPassword,
   resetPassword,
   updatePassword,
@@ -22,6 +23,7 @@ router.post('/forgot-password', forgotPassword);
 router.post('/reset-password/:token', resetPassword);
 
 router.get('/me', authenticate, getCurrentUser);
+router.patch('/update-profile', authenticate, updateProfile);
 router.patch('/update-password', authenticate, updatePassword);
 router.delete('/delete-account', authenticate, deleteAccount);
 

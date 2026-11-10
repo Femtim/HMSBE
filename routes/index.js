@@ -1,14 +1,9 @@
 const { Router } = require('express');
-const authRoutes = require('./auth.routes');
-const appointmentRoutes = require('./appointment.routes');
-const queueRoutes = require('./queue.routes');
-const adminRoutes = require('./admin.routes');
-
 const router = Router();
 
-router.use('/auth', authRoutes);
-router.use('/appointments', appointmentRoutes);
-router.use('/queue', queueRoutes);
-router.use('/admin', adminRoutes);
+router.use('/auth', require('./auth.routes'));
+router.use('/appointments', require('./appointment.routes'));
+router.use('/queue', require('./queue.routes'));
+router.use('/admin', require('./admin.routes'));
 
 module.exports = router;

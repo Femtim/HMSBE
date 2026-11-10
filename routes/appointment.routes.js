@@ -11,7 +11,6 @@ const { authenticate, authorizeRoles } = require('../middlewares/auth.middleware
 const router = Router();
 
 router.use(authenticate);
-
 router.get('/doctors', getActiveDoctorsByDepartment);
 router.get('/slots', getDoctorAvailableSlots);
 router.post('/book', authorizeRoles('PATIENT'), bookAppointment);

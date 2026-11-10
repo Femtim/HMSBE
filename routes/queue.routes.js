@@ -12,9 +12,7 @@ const { authenticate, authorizeRoles } = require('../middlewares/auth.middleware
 const router = Router();
 
 router.get('/live-board/:department', getLiveDepartmentBoard);
-
 router.use(authenticate);
-
 router.post('/check-in', authorizeRoles('PATIENT', 'SUPER_ADMIN'), checkInToQueue);
 router.get('/my-active-ticket', authorizeRoles('PATIENT'), getMyActiveTicket);
 router.patch('/call-next', authorizeRoles('DOCTOR'), callNextPatient);

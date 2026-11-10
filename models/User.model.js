@@ -3,56 +3,17 @@ const bcrypt = require('bcryptjs');
 
 const UserSchema = new mongoose.Schema(
   {
-    fullName: {
-      type: String,
-      required: [true, 'Full name is required'],
-      trim: true,
-    },
-    email: {
-      type: String,
-      required: [true, 'Email address is required'],
-      unique: true,
-      lowercase: true,
-      trim: true,
-    },
-    phone: {
-      type: String,
-      required: [true, 'Phone number is required'],
-      unique: true,
-      trim: true,
-    },
-    password: {
-      type: String,
-      required: [true, 'Password is required'],
-      minlength: 8,
-      select: false,
-    },
-    role: {
-      type: String,
-      enum: ['PATIENT', 'DOCTOR', 'SUPER_ADMIN'],
-      default: 'PATIENT',
-      index: true,
-    },
-    isActive: {
-      type: Boolean,
-      default: true,
-    },
-    isEmailVerified: {
-      type: Boolean,
-      default: false,
-    },
-    emailVerificationToken: {
-      type: String,
-    },
-    emailVerificationExpires: {
-      type: Date,
-    },
-    passwordResetToken: {
-      type: String,
-    },
-    passwordResetExpires: {
-      type: Date,
-    },
+    fullName: { type: String, required: [true, 'Full name is required'], trim: true },
+    email: { type: String, required: [true, 'Email address is required'], unique: true, lowercase: true, trim: true },
+    phone: { type: String, required: [true, 'Phone number is required'], unique: true, trim: true },
+    password: { type: String, required: [true, 'Password is required'], minlength: 8, select: false },
+    role: { type: String, enum: ['PATIENT', 'DOCTOR', 'SUPER_ADMIN'], default: 'PATIENT', index: true },
+    isActive: { type: Boolean, default: true },
+    isEmailVerified: { type: Boolean, default: false },
+    emailVerificationToken: { type: String },
+    emailVerificationExpires: { type: Date },
+    passwordResetToken: { type: String },
+    passwordResetExpires: { type: Date },
     patientProfile: {
       hospitalCardNumber: { type: String, sparse: true, unique: true },
       dateOfBirth: { type: Date },
@@ -61,24 +22,13 @@ const UserSchema = new mongoose.Schema(
       isVulnerable: { type: Boolean, default: false },
     },
     doctorProfile: {
-      department: {
-        type: String,
-        enum: ['GENERAL_OPD', 'PEDIATRICS', 'CARDIOLOGY', 'OBGYN', 'ORTHOPEDICS', 'DENTAL'],
-      },
+      department: { type: String, enum: ['GENERAL_OPD', 'PEDIATRICS', 'CARDIOLOGY', 'OBGYN', 'ORTHOPEDICS', 'DENTAL'] },
       specialization: { type: String },
       consultationRoom: { type: String },
       avgConsultationTimeMins: { type: Number, default: 15 },
       isAvailableToday: { type: Boolean, default: true },
-      workingDays: [
-        {
-          type: String,
-          enum: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'],
-        },
-      ],
-      shiftHours: {
-        start: { type: String, default: '08:00' },
-        end: { type: String, default: '16:00' },
-      },
+      workingDays: [{ type: String, enum: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'] }],
+      shiftHours: { start: { type: String, default: '08:00' }, end: { type: String, default: '16:00' } },
     },
   },
   { timestamps: true }

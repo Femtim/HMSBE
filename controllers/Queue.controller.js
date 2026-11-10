@@ -11,55 +11,47 @@ const DEPT_PREFIX_MAP = {
   ORTHOPEDICS: 'ORT',
   DENTAL: 'DNT',
 };
-
 const PRIORITY_WEIGHT_MAP = { ROUTINE: 1, VULNERABLE: 2, EMERGENCY: 3 };
 
 const generateAtomicTicketNumber = async (queueDate, department) => {
-  const counterId = `${queueDate}_${department}`;
   const counter = await Counter.findByIdAndUpdate(
-    counterId,
+    `${queueDate}_${department}`,
     { $inc: { seq: 1 } },
     { new: true, upsert: true }
   );
-  const prefix = DEPT_PREFIX_MAP[department] || 'GEN';
-  return `${prefix}-${String(counter.seq).padStart(3, '0')}`;
+  return `${DEPT_PREFIX_MAP[department] || 'GEN'}-${String(counter.seq).padStart(3, '0')}`;
 };
 
 const checkInToQueue = async (req, res) => {
   try {
     const { appointmentReference, patientId: walkInPatientId, doctorId: walkInDoctorId, priorityOverride } = req.body;
     const todayStr = new Date().toISOString().split('T')[0];
-
-    let patient, doctor;
-    let appointmentId = null;
+    let patient, doctor, appointmentId = null;
 
     if (appointmentReference) {
-      const appointment = await Appointment.findOne({ appointmentReference: appointmentReference.trim() }).populate('patientId doctorId');
-      if (!appointment) return res.status(404).json({ success: false, message: 'Appointment not found.' });
-      if (appointment.status === 'CHECKED_IN') return res.status(400).json({ success: false, message: 'Already checked in.' });
-
-      patient = appointment.patientId;
-      doctor = appointment.doctorId;
-      appointmentId = appointment._id;
-
-      await Appointment.findByIdAndUpdate(appointment._id, { $set: { status: 'CHECKED_IN' } });
+      const apt = await Appointment.findOne({ appointmentReference: appointmentReference.trim() }).populate('patientId doctorId');
+      if (!apt) return res.status(404).json({ success: false, message: 'Appointment not found.' });
+      patient = apt.patientId;
+      doctor = apt.doctorId;
+      appointmentId = apt._id;
+      await Appointment.findByIdAndUpdate(apt._id, { $set: { status: 'CHECKED_IN' } });
     } else {
       patient = await User.findById(walkInPatientId || req.user._id);
       doctor = await User.findById(walkInDoctorId);
       if (!patient || !doctor) return res.status(404).json({ success: false, message: 'Patient and Doctor required.' });
     }
 
-    let priorityLabel = 'ROUTINE';
-    if (priorityOverride && PRIORITY_WEIGHT_MAP[priorityOverride]) {
-      priorityLabel = priorityOverride;
-    } else if (patient.patientProfile?.isVulnerable) {
-      priorityLabel = 'VULNERABLE';
-    }
+    const priorityLabel =
+      priorityOverride && PRIORITY_WEIGHT_MAP[priorityOverride]
+        ? priorityOverride
+        : patient.patientProfile?.isVulnerable
+        ? 'VULNERABLE'
+        : 'ROUTINE';
     const priorityWeight = PRIORITY_WEIGHT_MAP[priorityLabel];
     const department = doctor.doctorProfile.department;
     const ticketNumber = await generateAtomicTicketNumber(todayStr, department);
-
     const checkInTime = new Date();
+
     const newTicket = await QueueTicket.create({
       ticketNumber,
       queueDate: todayStr,
@@ -74,37 +66,10 @@ const checkInToQueue = async (req, res) => {
       timestampsLog: { checkInTime },
     });
 
-    const patientsAhead = await QueueTicket.countDocuments({
-      queueDate: todayStr,
-      doctorId: doctor._id,
-      status: 'WAITING',
-      $or: [
-        { priorityWeight: { $gt: priorityWeight } },
-        { priorityWeight, 'timestampsLog.checkInTime': { $lt: checkInTime } },
-      ],
-    });
-
-    const avgConsultMins = doctor.doctorProfile.avgConsultationTimeMins || 15;
-    const estimatedWaitTimeMins = patientsAhead * avgConsultMins;
-
     const io = req.app.get('io');
     if (io) io.to(department).emit('queue:updated', { department, action: 'CHECK_IN', ticketNumber });
 
-    return res.status(201).json({
-      success: true,
-      message: 'Checked in successfully.',
-      data: {
-        ticketId: newTicket._id,
-        ticketNumber: newTicket.ticketNumber,
-        department,
-        doctor: doctor.fullName,
-        consultationRoom: newTicket.consultationRoom,
-        priority: priorityLabel,
-        status: newTicket.status,
-        patientsAhead,
-        estimatedWaitTimeMins,
-      },
-    });
+    return res.status(201).json({ success: true, message: 'Checked in to queue.', data: newTicket });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -118,35 +83,7 @@ const getMyActiveTicket = async (req, res) => {
       patientId: req.user._id,
       status: { $in: ['WAITING', 'CALLED', 'IN_CONSULTATION'] },
     }).populate('doctorId', 'fullName doctorProfile');
-
-    if (!ticket) return res.status(200).json({ success: true, data: null });
-
-    const patientsAhead = await QueueTicket.countDocuments({
-      queueDate: todayStr,
-      doctorId: ticket.doctorId._id,
-      status: 'WAITING',
-      $or: [
-        { priorityWeight: { $gt: ticket.priorityWeight } },
-        { priorityWeight: ticket.priorityWeight, 'timestampsLog.checkInTime': { $lt: ticket.timestampsLog.checkInTime } },
-      ],
-    });
-
-    const avgConsultMins = ticket.doctorId.doctorProfile?.avgConsultationTimeMins || 15;
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        ticketId: ticket._id,
-        ticketNumber: ticket.ticketNumber,
-        department: ticket.department,
-        doctor: ticket.doctorId.fullName,
-        consultationRoom: ticket.consultationRoom,
-        priority: ticket.priorityLabel,
-        status: ticket.status,
-        patientsAhead: ticket.status === 'CALLED' ? 0 : patientsAhead,
-        estimatedWaitTimeMins: ticket.status === 'CALLED' ? 0 : patientsAhead * avgConsultMins,
-      },
-    });
+    return res.status(200).json({ success: true, data: ticket });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -154,35 +91,25 @@ const getMyActiveTicket = async (req, res) => {
 
 const callNextPatient = async (req, res) => {
   try {
-    const doctorId = req.user._id;
     const todayStr = new Date().toISOString().split('T')[0];
     const calledTime = new Date();
-
     const nextTicket = await QueueTicket.findOneAndUpdate(
-      { queueDate: todayStr, doctorId, status: 'WAITING' },
+      { queueDate: todayStr, doctorId: req.user._id, status: 'WAITING' },
       { $set: { status: 'CALLED', 'timestampsLog.calledTime': calledTime } },
       { sort: { priorityWeight: -1, 'timestampsLog.checkInTime': 1 }, new: true }
     ).populate('patientId', 'fullName phone patientProfile');
 
-    if (!nextTicket) {
-      return res.status(200).json({ success: true, message: 'No waiting patients.', data: null });
-    }
-
-    const waitMs = calledTime - new Date(nextTicket.timestampsLog.checkInTime);
-    nextTicket.metrics.actualWaitTimeMins = Math.max(0, Math.round(waitMs / 60000));
-    await nextTicket.save();
+    if (!nextTicket) return res.status(200).json({ success: true, data: null, message: 'No waiting patients.' });
 
     const io = req.app.get('io');
     if (io) {
       io.to(nextTicket.department).emit('queue:patient_called', {
         ticketNumber: nextTicket.ticketNumber,
         consultationRoom: nextTicket.consultationRoom,
-        doctorName: req.user.fullName,
-        department: nextTicket.department,
       });
     }
 
-    return res.status(200).json({ success: true, message: `Calling ${nextTicket.ticketNumber}`, data: nextTicket });
+    return res.status(200).json({ success: true, data: nextTicket });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -190,13 +117,11 @@ const callNextPatient = async (req, res) => {
 
 const getDoctorActiveTicket = async (req, res) => {
   try {
-    const todayStr = new Date().toISOString().split('T')[0];
     const ticket = await QueueTicket.findOne({
-      queueDate: todayStr,
+      queueDate: new Date().toISOString().split('T')[0],
       doctorId: req.user._id,
       status: { $in: ['CALLED', 'IN_CONSULTATION'] },
     }).populate('patientId', 'fullName phone patientProfile');
-
     return res.status(200).json({ success: true, data: ticket });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
@@ -205,17 +130,11 @@ const getDoctorActiveTicket = async (req, res) => {
 
 const completePatientConsultation = async (req, res) => {
   try {
-    const { ticketId } = req.params;
-    const ticket = await QueueTicket.findById(ticketId);
+    const ticket = await QueueTicket.findById(req.params.ticketId);
     if (!ticket) return res.status(404).json({ success: false, message: 'Ticket not found.' });
 
-    const completedTime = new Date();
-    const startTime = ticket.timestampsLog.consultationStartTime || ticket.timestampsLog.calledTime;
-    const consultMins = startTime ? Math.max(1, Math.round((completedTime - new Date(startTime)) / 60000)) : 1;
-
     ticket.status = 'COMPLETED';
-    ticket.timestampsLog.completedTime = completedTime;
-    ticket.metrics.actualConsultationMins = consultMins;
+    ticket.timestampsLog.completedTime = new Date();
     await ticket.save();
 
     if (ticket.appointmentId) {
@@ -223,9 +142,9 @@ const completePatientConsultation = async (req, res) => {
     }
 
     const io = req.app.get('io');
-    if (io) io.to(ticket.department).emit('queue:updated', { department: ticket.department, action: 'COMPLETED', ticketNumber: ticket.ticketNumber });
+    if (io) io.to(ticket.department).emit('queue:updated', { department: ticket.department, action: 'COMPLETED' });
 
-    return res.status(200).json({ success: true, message: 'Consultation completed.', data: ticket });
+    return res.status(200).json({ success: true, message: 'Consultation completed.' });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
@@ -233,20 +152,15 @@ const completePatientConsultation = async (req, res) => {
 
 const getLiveDepartmentBoard = async (req, res) => {
   try {
-    const { department } = req.params;
-    const todayStr = new Date().toISOString().split('T')[0];
-
     const liveQueue = await QueueTicket.find({
-      queueDate: todayStr,
-      department: department.toUpperCase(),
+      queueDate: new Date().toISOString().split('T')[0],
+      department: req.params.department.toUpperCase(),
       status: { $in: ['CALLED', 'IN_CONSULTATION', 'WAITING'] },
     })
       .populate('doctorId', 'fullName')
-      .select('ticketNumber status priorityLabel consultationRoom timestampsLog.checkInTime doctorId')
       .sort({ status: 1, priorityWeight: -1, 'timestampsLog.checkInTime': 1 })
       .limit(30);
-
-    return res.status(200).json({ success: true, date: todayStr, department: department.toUpperCase(), data: liveQueue });
+    return res.status(200).json({ success: true, data: liveQueue });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
   }
