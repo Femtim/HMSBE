@@ -63,7 +63,7 @@ const registerPatient = async (req, res) => {
       },
     });
 
-    const clientUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
+    const clientUrl = (process.env.CLIENT_URL).replace(/\/$/, '');
     const verificationUrl = `${clientUrl}/verify-email/${rawVerificationToken}`;
 
     console.log(`[EMAIL DISPATCH] Verification link for ${newPatient.email}: ${verificationUrl}`);
@@ -71,10 +71,10 @@ const registerPatient = async (req, res) => {
     try {
       await sendEmail({
         to: newPatient.email,
-        subject: 'Verify Your Hospital Portal Email - HAQMS',
+        subject: 'Verify Your Hospital Portal Email - GENERAL HOSPITAL',
         html: `
           <div style="font-family: sans-serif; padding: 20px; color: #1e293b;">
-            <h2>Welcome to HAQMS, ${newPatient.fullName}</h2>
+            <h2>Welcome to GENERAL HOSPITAL, ${newPatient.fullName}</h2>
             <p>Please verify your email address by clicking the button below within 24 hours:</p>
             <a href="${verificationUrl}" style="background: #0d9488; color: white; padding: 10px 20px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold;">Verify Email Address</a>
             <p style="margin-top: 20px; font-size: 12px; color: #64748b;">If you did not request this registration, please ignore this email.</p>
