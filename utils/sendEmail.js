@@ -14,9 +14,9 @@ const sendEmail = async ({ to, subject, html }) => {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS,
     },
-    connectionTimeout: 5000,
-    greetingTimeout: 5000,
-    socketTimeout: 5000,
+    connectionTimeout: 9000,
+    greetingTimeout: 9000,
+    socketTimeout: 9000,
   });
 
   await transporter.sendMail({
