@@ -20,7 +20,7 @@ const sendEmail = async ({ to, subject, html }) => {
   });
 
   await transporter.sendMail({
-    from: `"GENERAL HOSPITAL" <${process.env.EMAIL_USER}>`,
+    from: `"LIVING-SOUL GENERAL HOSPITAL" <${process.env.EMAIL_USER}>`,
     to,
     subject,
     html,
